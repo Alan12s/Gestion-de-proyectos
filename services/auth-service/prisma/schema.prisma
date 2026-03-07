@@ -1,0 +1,75 @@
+// Prisma schema para Auth Service
+// Define la estructura de la base de datos de autenticación
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Rol del usuario
+enum UserRole {
+  user  // Usuario normal
+  admin // Administrador
+}
+
+// Tabla de Usuarios
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  
+  // Credenciales
+  email         String   @unique @db.VarChar(255)
+  passwordHash  String   @map("password_hash") @db.VarChar(255)
+  
+  // Info del usuario
+  name          String   @db.VarChar(255)
+  role          UserRole @default(user)
+  avatarUrl     String?  @map("avatar_url") @db.Text
+  
+  // Verificación
+  emailVerified Boolean  @default(false) @map("email_verified")
+  
+  // Actividad
+  lastLoginAt   DateTime? @map("last_login_at")
+  
+  // Fechas
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+  
+  // Relaciones
+  refreshTokens RefreshToken[]
+
+  // Índices
+  @@index([email])
+  @@index([createdAt(sort: Desc)])
+  @@map("users")
+}
+
+// Tabla de Refresh Tokens
+model RefreshToken {
+  id        String @id @default(uuid()) @db.Uuid
+  
+  // Token
+  token     String @unique @db.VarChar(500)
+  
+  // Usuario dueño del token
+  userId    String @map("user_id") @db.Uuid
+  
+  // Expiración
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+  
+  // Relación con usuario
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Índices
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}

@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: gestion-proyectos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: projectmanager
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-databases.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gestion-network
+
+  # Cache Redis
+  redis:
+    image: redis:7-alpine
+    container_name: gestion-proyectos-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - gestion-network
+
+  # Servicio de Autenticación
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile.dev
+    container_name: gestion-proyectos-auth
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql://postgres:password@postgres:5432/projectmanager_auth?schema=public"
+      JWT_SECRET: "tu-secret-super-seguro-cambialo-en-produccion"
+      JWT_EXPIRES_IN: "15m"
+      REFRESH_TOKEN_EXPIRES_IN: "7d"
+      PORT: 3001
+      NODE_ENV: "development"
+      REDIS_HOST: "redis"
+      REDIS_PORT: 6379
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/auth-service:/app
+      - /app/node_modules
+      - /app/dist
+    networks:
+      - gestion-network
+
+  # Servicio de Proyectos
+  projects-service:
+    build:
+      context: ./services/projects-service
+      dockerfile: Dockerfile.dev
+    container_name: gestion-proyectos-projects
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql://postgres:password@postgres:5432/projectmanager_projects?schema=public"
+      PORT: 3002
+      NODE_ENV: "development"
+      AUTH_SERVICE_URL: "http://auth-service:3001"
+      REDIS_HOST: "redis"
+      REDIS_PORT: 6379
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    volumes:
+      - ./services/projects-service:/app
+      - /app/node_modules
+      - /app/dist
+    networks:
+      - gestion-network
+
+  # Frontend Web
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: gestion-proyectos-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: "http://localhost/api"
+      VITE_APP_NAME: "Gestión de Proyectos"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - gestion-network
+
+  # Nginx (API Gateway)
+  nginx:
+    image: nginx:alpine
+    container_name: gestion-proyectos-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - auth-service
+      - projects-service
+      - frontend
+    networks:
+      - gestion-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  gestion-network:
+    driver: bridge
