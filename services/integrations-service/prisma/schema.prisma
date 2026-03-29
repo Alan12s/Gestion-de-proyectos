@@ -1,0 +1,211 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OAuthProvider {
+  github
+  jira
+  trello
+}
+
+model OAuthConnection {
+  id                String        @id @default(uuid())
+  userId            String
+  provider          OAuthProvider
+  providerUserId    String
+  providerUsername  String?
+  accessToken       String
+  refreshToken      String?
+  tokenExpiresAt    DateTime?
+  scopes            String[]
+  metadata          Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  lastSyncedAt      DateTime?
+
+  githubRepositories GitHubRepository[]
+  jiraConnection     JiraConnection?
+
+  @@unique([userId, provider])
+  @@map("oauth_connections")
+}
+
+model GitHubRepository {
+  id              String   @id @default(uuid())
+  connectionId    String
+  oauthConnection OAuthConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  repoId          BigInt
+  repoName        String
+  repoFullName    String
+  repoUrl         String
+  description     String?
+  defaultBranch   String
+  isPrivate       Boolean
+  language        String?
+  stars           Int      @default(0)
+  metadata        Json?
+
+  syncCommits     Boolean  @default(true)
+  syncPrs         Boolean  @default(true)
+  syncIssues      Boolean  @default(false)
+
+  commits         GitHubCommit[]
+  pullRequests    GitHubPullRequest[]
+  jiraBoards      JiraBoard[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  lastSyncedAt    DateTime?
+
+  @@unique([connectionId, repoId])
+  @@map("github_repositories")
+}
+
+model GitHubCommit {
+  id             String   @id @default(uuid())
+  repoId         String
+  repository     GitHubRepository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  commitSha      String
+  authorName     String
+  authorEmail    String
+  commitMessage  String
+  committedAt    DateTime
+  metadata       Json?
+
+  createdAt      DateTime @default(now())
+
+  @@unique([repoId, commitSha])
+  @@map("github_commits")
+}
+
+model GitHubPullRequest {
+  id             String   @id @default(uuid())
+  repoId         String
+  repository     GitHubRepository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  prNumber       Int
+  prId           BigInt
+  title          String
+  state          String
+  authorUsername String
+
+  createdAt      DateTime
+  updatedAt      DateTime?
+  mergedAt       DateTime?
+  metadata       Json?
+
+  @@unique([repoId, prNumber])
+  @@map("github_pull_requests")
+}
+
+// Conexiones de Jira
+model JiraConnection {
+  id               String   @id @default(uuid())
+  connectionId     String   @unique
+  oauthConnection  OAuthConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  
+  jiraSiteUrl      String
+  jiraCloudId      String
+  jiraAccountId    String
+  
+  boards           JiraBoard[]
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  @@map("jira_connections")
+}
+
+// Tableros de Jira
+model JiraBoard {
+  id               String   @id @default(uuid())
+  jiraConnectionId String
+  jiraConnection   JiraConnection @relation(fields: [jiraConnectionId], references: [id], onDelete: Cascade)
+  
+  boardId          Int
+  boardName        String
+  boardType        String
+  projectKey       String
+  projectName      String
+  
+  githubRepoId     String?
+  githubRepo       GitHubRepository? @relation(fields: [githubRepoId], references: [id], onDelete: SetNull)
+  
+  sprints          JiraSprint[]
+  issues           JiraIssue[]
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  lastSyncedAt     DateTime?
+  
+  @@unique([jiraConnectionId, boardId])
+  @@map("jira_boards")
+}
+
+// Sprints de Jira
+model JiraSprint {
+  id               String   @id @default(uuid())
+  boardId          String
+  board            JiraBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  
+  sprintId         Int
+  sprintName       String
+  state            String
+  startDate        DateTime?
+  endDate          DateTime?
+  completeDate     DateTime?
+  goal             String?
+  
+  issues           JiraIssue[]
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  @@unique([boardId, sprintId])
+  @@map("jira_sprints")
+}
+
+// Issues/Tareas de Jira
+model JiraIssue {
+  id               String   @id @default(uuid())
+  boardId          String
+  board            JiraBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  
+  sprintId         String?
+  sprint           JiraSprint? @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  
+  issueId          String
+  issueKey         String
+  summary          String
+  description      String?
+  issueType        String
+  status           String
+  priority         String?
+  
+  assigneeId       String?
+  assigneeName     String?
+  assigneeEmail    String?
+  
+  reporterId       String?
+  reporterName     String?
+  
+  storyPoints      Int?
+  labels           String[]
+  
+  dueDate          DateTime?
+  createdAt        DateTime
+  updatedAt        DateTime
+  resolvedAt       DateTime?
+  
+  @@unique([boardId, issueKey])
+  @@index([assigneeId])
+  @@index([status])
+  @@map("jira_issues")
+}
